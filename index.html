@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MesDépenses</title>
+<style>
+:root{--bg:#f4f6f8;--card:#fff;--tx:#14202b;--mu:#64707d;--bd:#e1e5ea;--ac:#0f766e;--ac2:#e3f3f1;--rd:#c0392b;--bt:#fff;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0e1418;--card:#172027;--tx:#e8eef2;--mu:#93a1ad;--bd:#27333c;--ac:#2dd4bf;--ac2:#12302d;--rd:#ff7b6b;--bt:#06201d;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:980px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px}
+h2{font-size:17px;margin:0 0 8px}
+.mu{color:var(--mu);font-size:13px}
+label{display:block;font-size:13px;color:var(--mu);margin:10px 0 4px}
+input,select{width:100%;padding:10px 12px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx);font:inherit}
+input:focus,select:focus{outline:2px solid var(--ac)}
+button{font:inherit;cursor:pointer;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:9px 14px;border-radius:10px}
+button.p{background:var(--ac);border-color:var(--ac);color:var(--bt);font-weight:600}
+button.s{padding:5px 9px;font-size:13px}.d{color:var(--rd)}
+button:disabled{opacity:.6}
+.auth{max-width:420px;margin:6vh auto}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px}
+.logo i{background:var(--ac);color:var(--bt);width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-style:normal}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg .on{background:var(--ac2);border-color:var(--ac);color:var(--ac);font-weight:600}
+.err{color:var(--rd);font-size:13px;margin-top:8px;min-height:18px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+.badge{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--ac2);color:var(--ac);font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:14px}
+.grid .card{margin:0}.big{font-size:22px;font-weight:700}
+.bar{height:8px;background:var(--bd);border-radius:9px;overflow:hidden;margin-top:8px}.bar b{display:block;height:100%;background:var(--ac)}
+.r2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.flt{display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;margin-bottom:10px}
+@media(max-width:640px){.flt{grid-template-columns:1fr 1fr}.flt input{grid-column:1/-1}}
+.it{display:flex;justify-content:space-between;gap:10px;padding:11px 0;border-top:1px solid var(--bd);align-items:center}
+.it:first-child{border-top:0}.it .l{min-width:0;overflow-wrap:anywhere}
+.it .r{text-align:right;white-space:nowrap}.it .r b{display:block;font-size:16px}
+.acts{display:flex;gap:6px;justify-content:flex-end;margin-top:4px}
+.cat{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center;margin:7px 0;font-size:13px}.cat .bar{margin:0}
+.empty{text-align:center;color:var(--mu);padding:20px 0}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const CATS=["Alimentation","Transport","Logement","Santé","Loisirs","Factures","Fournitures","Voyages","Salaires","Autre"];
+const STAT=["En attente","Approuvée","Remboursée","Rejetée"];
+const CUR={XOF:"FCFA",EUR:"€",USD:"$"};
+const today=()=>new Date().toISOString().slice(0,10);
+const tk={get(){try{return localStorage.getItem("dep_token")}catch(e){return null}},set(v){try{v?localStorage.setItem("dep_token",v):localStorage.removeItem("dep_token")}catch(e){}}};
+let S={token:tk.get(),mode:"login",type:"individuel",me:null,exp:[],members:[],q:"",cat:"",month:"",form:null,del:null,delM:null,busy:false};
+
+async function api(m,p,b){
+  const r=await fetch("/api"+p,{method:m,headers:{"Content-Type":"application/json",...(S.token?{Authorization:"Bearer "+S.token}:{})},body:b?JSON.stringify(b):undefined});
+  let j={};try{j=await r.json()}catch(e){}
+  if(r.status===401&&S.token){logout();throw new Error("Session expirée, reconnectez-vous.")}
+  if(!r.ok)throw new Error(j.error||"Erreur de communication avec le serveur.");
+  return j;
+}
+const isAdmin=()=>S.me.role==="admin", isOrg=()=>S.me.org_id!=null;
+const fmt=n=>new Intl.NumberFormat("fr-FR",{maximumFractionDigits:S.me.cur==="XOF"?0:2}).format(n||0)+" "+CUR[S.me.cur];
+const mine=e=>e.user_id===S.me.id&&(S.me.role!=="member"||e.status==="En attente");
+
+async function loadData(){const j=await api("GET","/data");S.me=j.me;S.exp=j.expenses;S.members=j.members}
+async function init(){
+  if(S.token){try{await loadData()}catch(e){S.token=null;tk.set(null)}}
+  render();
+}
+function logout(){S.token=null;S.me=null;tk.set(null);S.mode="login";render()}
+async function submitAuth(){
+  const e=$("#err"),su=S.mode==="signup",btn=$("#go");e.textContent="";
+  if(su&&$("#pw2").value!==$("#pw").value)return e.textContent="Les mots de passe ne correspondent pas.";
+  btn.disabled=true;
+  try{
+    const j=await api("POST","/auth/"+S.mode,{type:S.type,name:su?$("#nm").value:"",company:S.type==="entreprise"&&su?$("#co").value:"",email:$("#em").value,password:$("#pw").value,cur:su?$("#cu").value:""});
+    S.token=j.token;tk.set(j.token);await loadData();S.q=S.cat=S.month="";render();
+  }catch(x){e.textContent=x.message;btn.disabled=false}
+}
+function authView(){
+  const su=S.mode==="signup";
+  return `<div class="auth"><div class="card"><div class="logo"><i>₣</i>MesDépenses</div>
+  <p class="mu">${su?"Créez votre compte pour gérer vos dépenses.":"Connectez-vous pour accéder à vos dépenses."}</p>
+  ${su?`<div class="seg"><button class="${S.type==="individuel"?"on":""}" onclick="keep('individuel')">Individuel</button><button class="${S.type==="entreprise"?"on":""}" onclick="keep('entreprise')">Entreprise</button></div>
+  <label>Votre nom</label><input id="nm" autocomplete="name">
+  ${S.type==="entreprise"?`<label>Nom de l’entreprise</label><input id="co">`:""}`:""}
+  <label>E-mail</label><input id="em" type="email" autocomplete="email">
+  <label>Mot de passe</label><input id="pw" type="password" autocomplete="${su?"new-password":"current-password"}" onkeydown="if(event.key==='Enter'&&!${su})submitAuth()">
+  ${su?`<label>Confirmer le mot de passe</label><input id="pw2" type="password"><label>Devise</label><select id="cu"><option value="XOF">FCFA (XOF)</option><option value="EUR">Euro (€)</option><option value="USD">Dollar ($)</option></select>`:""}
+  <div class="err" id="err"></div>
+  <button id="go" class="p" style="width:100%" onclick="submitAuth()">${su?"Créer mon compte":"Se connecter"}</button>
+  <p class="mu" style="text-align:center;margin:14px 0 0">${su?"Déjà un compte ?":"Pas encore de compte ?"} <a href="#" style="color:var(--ac)" onclick="S.mode='${su?"login":"signup"}';render();return false">${su?"Se connecter":"S’inscrire"}</a></p></div>
+  <p class="mu" style="text-align:center">Un employé reçoit ses identifiants de l’administrateur de son entreprise.</p></div>`;
+}
+function keep(t){const v={nm:$("#nm")&&$("#nm").value,em:$("#em").value,pw:$("#pw").value};S.type=t;render();for(const k in v)if(v[k]&&$("#"+k))$("#"+k).value=v[k]}
+
+function appView(){
+  const m=S.me;
+  return `<div class="top"><div><div class="logo"><i>₣</i>MesDépenses</div><span class="mu">${esc(m.name)}${m.company?" · "+esc(m.company):""} <span class="badge">${isAdmin()?"Administrateur":m.role==="member"?"Employé":"Individuel"}</span></span></div>
+  <div style="display:flex;gap:8px"><button onclick="exportCsv()">Exporter CSV</button><button class="p" onclick="openForm()">+ Dépense</button><button onclick="logout()">Déconnexion</button></div></div>
+  <div class="grid" id="sum"></div><div id="formbox"></div>
+  <div class="card"><h2>Répartition par catégorie</h2><div id="cats"></div></div>
+  <div class="card"><h2>Dépenses${isAdmin()?" de l’entreprise":""}</h2>
+  <div class="flt"><input id="q" placeholder="Rechercher…" oninput="S.q=this.value;upd()">
+  <select onchange="S.cat=this.value;upd()"><option value="">Toutes catégories</option>${CATS.map(c=>`<option ${S.cat===c?"selected":""}>${c}</option>`).join("")}</select>
+  <select id="fm" onchange="S.month=this.value;upd()"></select><button onclick="S.q=S.cat=S.month='';render()">Réinitialiser</button></div><div id="list"></div></div>
+  ${isAdmin()?`<div class="card"><h2>Équipe</h2><div id="team"></div>
+  <div class="r2"><div><label>Nom de l’employé</label><input id="mn"></div><div><label>E-mail</label><input id="me" type="email"></div></div>
+  <label>Mot de passe provisoire (8 caractères min.)</label><input id="mp" type="text">
+  <div class="err" id="merr"></div><button class="p" onclick="addMember()">Ajouter l’employé</button></div>`:""}`;
+}
+const months=()=>[...new Set(S.exp.map(e=>e.d.slice(0,7)))].sort().reverse();
+const mlabel=m=>new Date(m.slice(0,4),m.slice(5)-1,1).toLocaleDateString("fr-FR",{month:"long",year:"numeric"});
+
+function upd(){
+  const cm=today().slice(0,7),B=S.me.budget,own=S.exp.filter(e=>e.user_id===S.me.id);
+  $("#fm").innerHTML=`<option value="">Tous les mois</option>`+months().map(x=>`<option value="${x}" ${S.month===x?"selected":""}>${mlabel(x)}</option>`).join("");
+  $("#q").value=S.q;
+  const spent=S.exp.filter(e=>e.d.startsWith(cm)).reduce((a,e)=>a+e.amount,0);
+  const mySpent=own.filter(e=>e.d.startsWith(cm)).reduce((a,e)=>a+e.amount,0);
+  const over=B>0&&mySpent>B;
+  $("#sum").innerHTML=`<div class="card"><div class="mu">Ce mois-ci${isAdmin()?" (entreprise)":""}</div><div class="big">${fmt(spent)}</div></div>
+  <div class="card"><div class="mu">Total cumulé</div><div class="big">${fmt(S.exp.reduce((a,e)=>a+e.amount,0))}</div><div class="mu">${S.exp.length} dépense(s)</div></div>
+  <div class="card"><div class="mu">Mon budget mensuel</div><div style="display:flex;gap:6px;margin-top:4px"><input id="bd" type="number" min="0" value="${B||""}" placeholder="Définir un budget"><button class="s" onclick="setBudget()">OK</button></div>
+  ${B>0?`<div class="bar"><b style="width:${Math.min(100,mySpent/B*100)}%;background:${over?"var(--rd)":"var(--ac)"}"></b></div><div class="mu" style="margin-top:4px;${over?"color:var(--rd)":""}">${over?"Dépassé de "+fmt(mySpent-B):"Reste "+fmt(B-mySpent)}</div>`:""}</div>`;
+  const list=S.exp.filter(e=>(!S.cat||e.cat===S.cat)&&(!S.month||e.d.startsWith(S.month))&&(!S.q||(e.label+" "+e.who+" "+e.note).toLowerCase().includes(S.q.toLowerCase())));
+  const sums={};list.forEach(e=>sums[e.cat]=(sums[e.cat]||0)+e.amount);const mx=Math.max(0,...Object.values(sums));
+  $("#cats").innerHTML=mx?Object.entries(sums).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="cat"><span>${c}</span><div class="bar"><b style="width:${v/mx*100}%"></b></div><span>${fmt(v)}</span></div>`).join(""):`<div class="empty">Aucune donnée.</div>`;
+  $("#list").innerHTML=list.length?list.map(e=>{
+    const can=mine(e)||isAdmin();
+    return `<div class="it"><div class="l"><b>${esc(e.label)}</b><span class="mu">${new Date(e.d+"T00:00").toLocaleDateString("fr-FR")} · ${e.cat}${isOrg()?" · "+esc(e.who):""}${isOrg()&&!isAdmin()?" · "+e.status:""}</span>${e.note?`<div class="mu">${esc(e.note)}</div>`:""}</div>
+    <div class="r"><b>${fmt(e.amount)}</b>${isAdmin()?`<select style="width:auto;padding:3px 6px;font-size:12px;margin-top:3px" onchange="setStatus(${e.id},this.value)">${STAT.map(s=>`<option ${e.status===s?"selected":""}>${s}</option>`).join("")}</select>`:""}
+    <div class="acts">${S.del===e.id?`<button class="s d" onclick="delExp(${e.id})">Confirmer</button><button class="s" onclick="S.del=null;upd()">Annuler</button>`:`${mine(e)?`<button class="s" onclick="openForm(${e.id})">Modifier</button>`:""}${can?`<button class="s d" onclick="S.del=${e.id};upd()">Suppr.</button>`:""}`}</div></div></div>`}).join("")
+    +`<div class="it"><b>Total affiché</b><b>${fmt(list.reduce((a,e)=>a+e.amount,0))}</b></div>`:`<div class="empty">Aucune dépense. Cliquez sur « + Dépense » pour commencer.</div>`;
+  if(isAdmin())$("#team").innerHTML=S.members.map(u=>`<div class="it"><div class="l"><b>${esc(u.name)}</b><span class="mu">${esc(u.email)} · ${u.role==="admin"?"Administrateur":"Employé"}</span></div>${u.id===S.me.id?"":S.delM===u.id?`<div class="acts"><button class="s d" onclick="delMember(${u.id})">Confirmer</button><button class="s" onclick="S.delM=null;upd()">Annuler</button></div>`:`<button class="s d" onclick="S.delM=${u.id};upd()">Retirer</button>`}</div>`).join("");
+}
+async function run(fn){try{await fn();await loadData();upd()}catch(e){alert(e.message)}}
+function openForm(id){
+  const e=id?S.exp.find(x=>x.id===id):{d:today(),label:"",amount:"",cat:CATS[0],note:""};S.form=id||"new";
+  $("#formbox").innerHTML=`<div class="card"><h2>${id?"Modifier la dépense":"Nouvelle dépense"}</h2>
+  <div class="r2"><div><label>Date</label><input id="f_d" type="date" value="${e.d}"></div><div><label>Montant (${CUR[S.me.cur]})</label><input id="f_a" type="number" min="0" step="any" value="${e.amount}"></div></div>
+  <label>Libellé</label><input id="f_l" value="${esc(e.label)}" placeholder="Ex. : courses, carburant, loyer…">
+  <div class="r2"><div><label>Catégorie</label><select id="f_c">${CATS.map(c=>`<option ${e.cat===c?"selected":""}>${c}</option>`).join("")}</select></div><div><label>Note (facultatif)</label><input id="f_n" value="${esc(e.note)}"></div></div>
+  <div class="err" id="ferr"></div><div style="display:flex;gap:8px;margin-top:6px"><button class="p" onclick="saveExp()">Enregistrer</button><button onclick="$('#formbox').innerHTML=''">Annuler</button></div></div>`;
+  $("#f_l").focus();$("#formbox").scrollIntoView({behavior:"smooth"});
+}
+async function saveExp(){
+  const o={d:$("#f_d").value,label:$("#f_l").value,amount:parseFloat($("#f_a").value),cat:$("#f_c").value,note:$("#f_n").value};
+  if(!o.d||!o.label.trim()||!(o.amount>0))return $("#ferr").textContent="Date, libellé et montant positif obligatoires.";
+  try{S.form==="new"?await api("POST","/expenses",o):await api("PUT","/expenses/"+S.form,o);await loadData();$("#formbox").innerHTML="";upd()}catch(e){$("#ferr").textContent=e.message}
+}
+const delExp=id=>{S.del=null;run(()=>api("DELETE","/expenses/"+id))};
+const setStatus=(id,s)=>run(()=>api("PUT","/expenses/"+id+"/status",{status:s}));
+const setBudget=()=>run(()=>api("PUT","/budget",{budget:$("#bd").value}));
+const delMember=id=>{S.delM=null;run(()=>api("DELETE","/members/"+id))};
+async function addMember(){
+  try{await api("POST","/members",{name:$("#mn").value,email:$("#me").value,password:$("#mp").value});await loadData();render()}catch(e){$("#merr").textContent=e.message}
+}
+function exportCsv(){
+  const q=v=>`"${String(v==null?"":v).replace(/"/g,'""')}"`;
+  const rows=[["Date","Libellé","Catégorie","Montant","Auteur","Statut","Note"],...S.exp.map(e=>[e.d,e.label,e.cat,e.amount,e.who,e.status,e.note])];
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.map(q).join(";")).join("\n")],{type:"text/csv"}));a.download="depenses.csv";a.click();
+}
+function render(){$("#app").innerHTML=S.me?appView():authView();if(S.me)upd()}
+init();
+</script>
+</body>
+</html>
