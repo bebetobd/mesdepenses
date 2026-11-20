@@ -1,6 +1,7 @@
 const { neon } = require("@neondatabase/serverless");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const sql = neon(process.env.DATABASE_URL || "postgresql://x:x@localhost/x");
 const SECRET = process.env.JWT_SECRET;
@@ -13,6 +14,7 @@ let ready;
 const init = () => ready || (ready = (async () => {
   await sql`CREATE TABLE IF NOT EXISTS orgs(id serial PRIMARY KEY, name text NOT NULL)`;
   await sql`CREATE TABLE IF NOT EXISTS users(id serial PRIMARY KEY, org_id int REFERENCES orgs(id) ON DELETE CASCADE, name text NOT NULL, email text UNIQUE NOT NULL, hash text NOT NULL, role text NOT NULL, cur text NOT NULL DEFAULT 'XOF', budget float8 NOT NULL DEFAULT 0)`;
+  await sql`CREATE TABLE IF NOT EXISTS pending(email text PRIMARY KEY, name text NOT NULL, company text NOT NULL DEFAULT '', ent boolean NOT NULL, cur text NOT NULL, hash text NOT NULL, code_hash text NOT NULL, expires float8 NOT NULL, attempts int NOT NULL DEFAULT 0, last_sent float8 NOT NULL)`;
   await sql`CREATE TABLE IF NOT EXISTS expenses(id serial PRIMARY KEY, user_id int NOT NULL REFERENCES users(id) ON DELETE CASCADE, org_id int, d text NOT NULL, label text NOT NULL, amount float8 NOT NULL, cat text NOT NULL, note text NOT NULL DEFAULT '', status text NOT NULL DEFAULT 'En attente')`;
 })());
 
@@ -25,6 +27,38 @@ async function auth(req) {
     const r = await sql`SELECT u.id,u.org_id,u.name,u.email,u.role,u.cur,u.budget,o.name AS company FROM users u LEFT JOIN orgs o ON o.id=u.org_id WHERE u.id=${id}`;
     return r[0] || null;
   } catch (e) { return null; }
+}
+
+const codeHash = (email, code) => crypto.createHash("sha256").update(email + ":" + code + ":" + SECRET).digest("hex");
+const he = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function sendCode(email, name, code) {
+  const key = process.env.BREVO_API_KEY, from = process.env.MAIL_FROM;
+  if (!key || !from) throw Object.assign(new Error("cfg"), { user: "Envoi d’e-mails non configuré (BREVO_API_KEY, MAIL_FROM)." });
+  const r = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: { "api-key": key, "Content-Type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      sender: { name: process.env.MAIL_FROM_NAME || "MesDépenses", email: from },
+      to: [{ email, name }],
+      subject: "Votre code de confirmation MesDépenses",
+      htmlContent: `<p>Bonjour ${he(name)},</p><p>Votre code de confirmation est :</p><p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p><p>Il est valable 10 minutes. Si vous n’êtes pas à l’origine de cette demande, ignorez ce message.</p>`,
+    }),
+  });
+  if (!r.ok) {
+    console.error("Brevo", r.status, await r.text());
+    throw Object.assign(new Error("mail"), { user: "Impossible d’envoyer l’e-mail pour le moment. Vérifiez la configuration Brevo." });
+  }
+}
+
+async function startVerification(p, res) {
+  const old = (await sql`SELECT last_sent FROM pending WHERE email=${p.email}`)[0];
+  if (old && Date.now() - old.last_sent < 60000) return err(res, 429, "Patientez une minute avant de demander un nouveau code.");
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
+  const now = Date.now();
+  await sql`INSERT INTO pending(email,name,company,ent,cur,hash,code_hash,expires,attempts,last_sent) VALUES(${p.email},${p.name},${p.company},${p.ent},${p.cur},${p.hash},${codeHash(p.email, code)},${now + 600000},0,${now}) ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name,company=EXCLUDED.company,ent=EXCLUDED.ent,cur=EXCLUDED.cur,hash=EXCLUDED.hash,code_hash=EXCLUDED.code_hash,expires=EXCLUDED.expires,attempts=0,last_sent=EXCLUDED.last_sent`;
+  await sendCode(p.email, p.name, code);
+  return res.json({ pending: true });
 }
 
 function cleanExpense(b) {
@@ -56,11 +90,38 @@ module.exports = async (req, res) => {
         if (password.length < 8) return err(res, 400, "Mot de passe : 8 caractères minimum.");
         if ((await sql`SELECT 1 FROM users WHERE email=${email}`).length) return err(res, 409, "Un compte existe déjà avec cet e-mail.");
         const hash = await bcrypt.hash(password, 10);
+        const cur = CURS.includes(body.cur) ? body.cur : "XOF";
+        if (process.env.REQUIRE_EMAIL_CODE === "1")
+          return startVerification({ email, name, company: ent ? company : "", ent, cur, hash }, res);
+        // Inscription directe (code e-mail désactivé)
         let org = null;
         if (ent) org = (await sql`INSERT INTO orgs(name) VALUES(${company}) RETURNING id`)[0].id;
-        const cur = CURS.includes(body.cur) ? body.cur : "XOF";
         const u = (await sql`INSERT INTO users(org_id,name,email,hash,role,cur) VALUES(${org},${name},${email},${hash},${ent ? "admin" : "solo"},${cur}) RETURNING id`)[0];
         return res.json({ token: sign(u.id) });
+      }
+      if (b === "verify") {
+        const p = (await sql`SELECT * FROM pending WHERE email=${email}`)[0];
+        if (!p) return err(res, 400, "Aucune inscription en attente. Recommencez.");
+        if (Date.now() > p.expires) return err(res, 400, "Code expiré. Demandez un nouveau code.");
+        if (p.attempts >= 5) return err(res, 429, "Trop d’essais. Demandez un nouveau code.");
+        if (codeHash(email, String(body.code || "").trim()) !== p.code_hash) {
+          await sql`UPDATE pending SET attempts=attempts+1 WHERE email=${email}`;
+          return err(res, 400, "Code incorrect.");
+        }
+        if ((await sql`SELECT 1 FROM users WHERE email=${email}`).length) {
+          await sql`DELETE FROM pending WHERE email=${email}`;
+          return err(res, 409, "Un compte existe déjà avec cet e-mail.");
+        }
+        let org = null;
+        if (p.ent) org = (await sql`INSERT INTO orgs(name) VALUES(${p.company}) RETURNING id`)[0].id;
+        const u = (await sql`INSERT INTO users(org_id,name,email,hash,role,cur) VALUES(${org},${p.name},${email},${p.hash},${p.ent ? "admin" : "solo"},${p.cur}) RETURNING id`)[0];
+        await sql`DELETE FROM pending WHERE email=${email}`;
+        return res.json({ token: sign(u.id) });
+      }
+      if (b === "resend") {
+        const p = (await sql`SELECT * FROM pending WHERE email=${email}`)[0];
+        if (!p) return err(res, 400, "Aucune inscription en attente. Recommencez.");
+        return startVerification({ email, name: p.name, company: p.company, ent: p.ent, cur: p.cur, hash: p.hash }, res);
       }
       if (b === "login") {
         const u = (await sql`SELECT id,hash FROM users WHERE email=${email}`)[0];
@@ -143,6 +204,7 @@ module.exports = async (req, res) => {
     }
     return err(res, 404, "Introuvable");
   } catch (e) {
+    if (e.user) return err(res, 502, e.user);
     ready = null;
     console.error(e);
     return err(res, 500, "Erreur serveur. Vérifiez la configuration (DATABASE_URL).");
