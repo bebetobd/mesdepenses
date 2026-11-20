@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>MesDépenses</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#0f766e">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="MesDépenses">
 <style>
 :root{--bg:#f4f6f8;--card:#fff;--tx:#14202b;--mu:#64707d;--bd:#e1e5ea;--ac:#0f766e;--ac2:#e3f3f1;--rd:#c0392b;--bt:#fff;color-scheme:light}
 @media (prefers-color-scheme:dark){:root{--bg:#0e1418;--card:#172027;--tx:#e8eef2;--mu:#93a1ad;--bd:#27333c;--ac:#2dd4bf;--ac2:#12302d;--rd:#ff7b6b;--bt:#06201d;color-scheme:dark}}
@@ -20,7 +26,7 @@ button{font:inherit;cursor:pointer;border:1px solid var(--bd);background:var(--c
 button.p{background:var(--ac);border-color:var(--ac);color:var(--bt);font-weight:600}
 button.s{padding:5px 9px;font-size:13px}.d{color:var(--rd)}
 button:disabled{opacity:.6}
-.auth{max-width:420px;margin:6vh auto}
+.auth{max-width:420px;margin:0 auto;display:flex;flex-direction:column;justify-content:center;min-height:calc(100vh - 32px);min-height:calc(100dvh - 32px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
 .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px}
 .logo i{background:var(--ac);color:var(--bt);width:34px;height:34px;border-radius:10px;display:grid;place-items:center;font-style:normal}
 .seg{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -42,7 +48,7 @@ button:disabled{opacity:.6}
 .empty{text-align:center;color:var(--mu);padding:20px 0}
 input,select{font-size:16px;min-height:44px}
 button{min-height:40px}button.s{min-height:34px}
-.btns{display:flex;gap:8px}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
 .fab{display:none;position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:56px;height:56px;min-height:56px;border-radius:50%;padding:0;font-size:30px;line-height:1;box-shadow:0 4px 14px rgba(0,0,0,.35);z-index:5}
 @media(max-width:640px){
 .wrap{padding:12px 12px 90px}
@@ -56,12 +62,28 @@ button{min-height:40px}button.s{min-height:34px}
 .it .r{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;text-align:left;white-space:normal}
 .it .r b{display:inline}.acts{margin-top:0}
 .cat{grid-template-columns:84px 1fr auto}
-.auth{margin:2vh auto}
+.auth{min-height:calc(100vh - 102px);min-height:calc(100dvh - 102px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))}
+}
+.mc{display:flex;align-items:flex-end;gap:8px;height:170px}
+.mcb{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;min-width:0}
+.mcb i{display:block;width:100%;background:var(--ac);border-radius:6px 6px 0 0;min-height:2px}
+.mv{font-size:11px;color:var(--mu)}.ml{font-size:12px;color:var(--mu)}
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px}
+.ov img{max-width:100%;max-height:100%;border-radius:8px}
+#report{display:none}
+@media print{
+html,body{background:#fff!important;color:#000!important}
+#app,.fab,.ov{display:none!important}
+#report{display:block;font:12px/1.4 system-ui,sans-serif;color:#000;padding:0}
+#report table{width:100%;border-collapse:collapse;margin-bottom:12px}
+#report th,#report td{border-bottom:1px solid #bbb;padding:4px 6px;text-align:left}
+#report .n{text-align:right}
 }
 </style>
 </head>
 <body>
 <div class="wrap" id="app"></div>
+<div id="report"></div>
 <script>
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -134,9 +156,10 @@ function keep(t){const v={nm:$("#nm")&&$("#nm").value,em:$("#em").value,pw:$("#p
 function appView(){
   const m=S.me;
   return `<div class="top"><div><div class="logo"><i>₣</i>MesDépenses</div><span class="mu">${esc(m.name)}${m.company?" · "+esc(m.company):""} <span class="badge">${isAdmin()?"Administrateur":m.role==="member"?"Employé":"Individuel"}</span></span></div>
-  <div class="btns"><button onclick="exportCsv()">Exporter CSV</button><button class="p hm" onclick="openForm()">+ Dépense</button><button onclick="logout()">Déconnexion</button></div></div>
+  <div class="btns"><button class="p hm" onclick="openForm()">+ Dépense</button><button onclick="exportCsv()">Exporter CSV</button><button onclick="printReport()">Rapport PDF</button><button onclick="openPwd()">Mot de passe</button><button id="inst" ${dip?"":'style="display:none"'} onclick="installApp()">Installer l’app</button><button onclick="logout()">Déconnexion</button></div></div>
   <button class="p fab" onclick="openForm()" aria-label="Ajouter une dépense">+</button>
   <div class="grid" id="sum"></div><div id="formbox"></div>
+  <div class="card"><h2>Évolution sur 6 mois</h2><div class="mc" id="mchart"></div></div>
   <div class="card"><h2>Répartition par catégorie</h2><div id="cats"></div></div>
   <div class="card"><h2>Dépenses${isAdmin()?" de l’entreprise":""}</h2>
   <div class="flt"><input id="q" placeholder="Rechercher…" oninput="S.q=this.value;upd()">
@@ -150,6 +173,7 @@ function appView(){
 const months=()=>[...new Set(S.exp.map(e=>e.d.slice(0,7)))].sort().reverse();
 const mlabel=m=>new Date(m.slice(0,4),m.slice(5)-1,1).toLocaleDateString("fr-FR",{month:"long",year:"numeric"});
 
+function getList(){return S.exp.filter(e=>(!S.cat||e.cat===S.cat)&&(!S.month||e.d.startsWith(S.month))&&(!S.q||(e.label+" "+e.who+" "+e.note).toLowerCase().includes(S.q.toLowerCase())))}
 function upd(){
   const cm=today().slice(0,7),B=S.me.budget,own=S.exp.filter(e=>e.user_id===S.me.id);
   $("#fm").innerHTML=`<option value="">Tous les mois</option>`+months().map(x=>`<option value="${x}" ${S.month===x?"selected":""}>${mlabel(x)}</option>`).join("");
@@ -161,29 +185,34 @@ function upd(){
   <div class="card"><div class="mu">Total cumulé</div><div class="big">${fmt(S.exp.reduce((a,e)=>a+e.amount,0))}</div><div class="mu">${S.exp.length} dépense(s)</div></div>
   <div class="card"><div class="mu">Mon budget mensuel</div><div style="display:flex;gap:6px;margin-top:4px"><input id="bd" type="number" min="0" value="${B||""}" placeholder="Définir un budget"><button class="s" onclick="setBudget()">OK</button></div>
   ${B>0?`<div class="bar"><b style="width:${Math.min(100,mySpent/B*100)}%;background:${over?"var(--rd)":"var(--ac)"}"></b></div><div class="mu" style="margin-top:4px;${over?"color:var(--rd)":""}">${over?"Dépassé de "+fmt(mySpent-B):"Reste "+fmt(B-mySpent)}</div>`:""}</div>`;
-  const list=S.exp.filter(e=>(!S.cat||e.cat===S.cat)&&(!S.month||e.d.startsWith(S.month))&&(!S.q||(e.label+" "+e.who+" "+e.note).toLowerCase().includes(S.q.toLowerCase())));
+  const list=getList();
   const sums={};list.forEach(e=>sums[e.cat]=(sums[e.cat]||0)+e.amount);const mx=Math.max(0,...Object.values(sums));
   $("#cats").innerHTML=mx?Object.entries(sums).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<div class="cat"><span>${c}</span><div class="bar"><b style="width:${v/mx*100}%"></b></div><span>${fmt(v)}</span></div>`).join(""):`<div class="empty">Aucune donnée.</div>`;
+  const nw=new Date(),ks=[];for(let i=5;i>=0;i--){const d=new Date(nw.getFullYear(),nw.getMonth()-i,1);ks.push(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0"))}
+  const vs=ks.map(k=>S.exp.filter(e=>e.d.startsWith(k)).reduce((a,e)=>a+e.amount,0)),vm=Math.max(...vs,1);
+  $("#mchart").innerHTML=vs.map((v,i)=>`<div class="mcb"><span class="mv">${v?new Intl.NumberFormat("fr-FR",{notation:"compact"}).format(v):""}</span><i style="height:${v/vm*78}%"></i><span class="ml">${new Date(ks[i]+"-01T00:00").toLocaleDateString("fr-FR",{month:"short"})}</span></div>`).join("");
   $("#list").innerHTML=list.length?list.map(e=>{
     const can=mine(e)||isAdmin();
-    return `<div class="it"><div class="l"><b>${esc(e.label)}</b><span class="mu">${new Date(e.d+"T00:00").toLocaleDateString("fr-FR")} · ${e.cat}${isOrg()?" · "+esc(e.who):""}${isOrg()&&!isAdmin()?" · "+e.status:""}</span>${e.note?`<div class="mu">${esc(e.note)}</div>`:""}</div>
+    return `<div class="it"><div class="l"><b>${esc(e.label)}</b><span class="mu">${new Date(e.d+"T00:00").toLocaleDateString("fr-FR")} · ${e.cat}${isOrg()?" · "+esc(e.who):""}${isOrg()&&!isAdmin()?" · "+e.status:""}</span>${e.note?`<div class="mu">${esc(e.note)}</div>`:""}${e.rc?`<a href="#" style="color:var(--ac);font-size:13px" onclick="viewReceipt(${e.id});return false">📎 Voir le reçu</a>`:""}</div>
     <div class="r"><b>${fmt(e.amount)}</b>${isAdmin()?`<select style="width:auto;padding:3px 6px;font-size:12px;margin-top:3px" onchange="setStatus(${e.id},this.value)">${STAT.map(s=>`<option ${e.status===s?"selected":""}>${s}</option>`).join("")}</select>`:""}
     <div class="acts">${S.del===e.id?`<button class="s d" onclick="delExp(${e.id})">Confirmer</button><button class="s" onclick="S.del=null;upd()">Annuler</button>`:`${mine(e)?`<button class="s" onclick="openForm(${e.id})">Modifier</button>`:""}${can?`<button class="s d" onclick="S.del=${e.id};upd()">Suppr.</button>`:""}`}</div></div></div>`}).join("")
     +`<div class="it"><b>Total affiché</b><b>${fmt(list.reduce((a,e)=>a+e.amount,0))}</b></div>`:`<div class="empty">Aucune dépense. Cliquez sur « + Dépense » pour commencer.</div>`;
-  if(isAdmin())$("#team").innerHTML=S.members.map(u=>`<div class="it"><div class="l"><b>${esc(u.name)}</b><span class="mu">${esc(u.email)} · ${u.role==="admin"?"Administrateur":"Employé"}</span></div>${u.id===S.me.id?"":S.delM===u.id?`<div class="acts"><button class="s d" onclick="delMember(${u.id})">Confirmer</button><button class="s" onclick="S.delM=null;upd()">Annuler</button></div>`:`<button class="s d" onclick="S.delM=${u.id};upd()">Retirer</button>`}</div>`).join("");
+  if(isAdmin())$("#team").innerHTML=S.members.map(u=>`<div class="it"><div class="l"><b>${esc(u.name)}</b><span class="mu">${esc(u.email)} · ${u.role==="admin"?"Administrateur":"Employé"}</span></div>${u.id===S.me.id?"":S.delM===u.id?`<div class="acts"><button class="s d" onclick="delMember(${u.id})">Confirmer</button><button class="s" onclick="S.delM=null;upd()">Annuler</button></div>`:S.pwM===u.id?`<div class="acts"><input id="np" placeholder="Nouveau mot de passe" style="width:170px;min-height:34px;padding:5px 8px"><button class="s p" onclick="resetPwd(${u.id})">OK</button><button class="s" onclick="S.pwM=null;upd()">×</button></div>`:`<div class="acts"><button class="s" onclick="S.pwM=${u.id};upd()">Mot de passe</button><button class="s d" onclick="S.delM=${u.id};upd()">Retirer</button></div>`}</div>`).join("");
 }
 async function run(fn){try{await fn();await loadData();upd()}catch(e){alert(e.message)}}
 function openForm(id){
-  const e=id?S.exp.find(x=>x.id===id):{d:today(),label:"",amount:"",cat:CATS[0],note:""};S.form=id||"new";
+  const e=id?S.exp.find(x=>x.id===id):{d:today(),label:"",amount:"",cat:CATS[0],note:""};S.form=id||"new";S.rec=undefined;
   $("#formbox").innerHTML=`<div class="card"><h2>${id?"Modifier la dépense":"Nouvelle dépense"}</h2>
   <div class="r2"><div><label>Date</label><input id="f_d" type="date" value="${e.d}"></div><div><label>Montant (${CUR[S.me.cur]})</label><input id="f_a" type="number" min="0" step="any" value="${e.amount}"></div></div>
   <label>Libellé</label><input id="f_l" value="${esc(e.label)}" placeholder="Ex. : courses, carburant, loyer…">
   <div class="r2"><div><label>Catégorie</label><select id="f_c">${CATS.map(c=>`<option ${e.cat===c?"selected":""}>${c}</option>`).join("")}</select></div><div><label>Note (facultatif)</label><input id="f_n" value="${esc(e.note)}"></div></div>
+  <label>Reçu (photo, facultatif)</label><input id="f_r" type="file" accept="image/*" onchange="pickReceipt(this)">
+  <div id="rprev" class="mu" style="margin-top:6px">${id&&e.rc?`Un reçu est enregistré. <a href="#" style="color:var(--ac)" onclick="viewReceipt(${id});return false">Voir</a> · <a href="#" style="color:var(--ac)" onclick="S.rec=null;this.parentNode.textContent='Le reçu sera retiré à l’enregistrement.';return false">Retirer</a>`:""}</div>
   <div class="err" id="ferr"></div><div style="display:flex;gap:8px;margin-top:6px"><button class="p" onclick="saveExp()">Enregistrer</button><button onclick="$('#formbox').innerHTML=''">Annuler</button></div></div>`;
   $("#f_l").focus();$("#formbox").scrollIntoView({behavior:"smooth"});
 }
 async function saveExp(){
-  const o={d:$("#f_d").value,label:$("#f_l").value,amount:parseFloat($("#f_a").value),cat:$("#f_c").value,note:$("#f_n").value};
+  const o={d:$("#f_d").value,label:$("#f_l").value,amount:parseFloat($("#f_a").value),cat:$("#f_c").value,note:$("#f_n").value,receipt:S.rec};
   if(!o.d||!o.label.trim()||!(o.amount>0))return $("#ferr").textContent="Date, libellé et montant positif obligatoires.";
   try{S.form==="new"?await api("POST","/expenses",o):await api("PUT","/expenses/"+S.form,o);await loadData();$("#formbox").innerHTML="";upd()}catch(e){$("#ferr").textContent=e.message}
 }
@@ -200,6 +229,37 @@ function exportCsv(){
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.map(q).join(";")).join("\n")],{type:"text/csv"}));a.download="depenses.csv";a.click();
 }
 function render(){$("#app").innerHTML=S.me?appView():authView();if(S.me)upd()}
+function compress(file){return new Promise((ok,ko)=>{const im=new Image(),u=URL.createObjectURL(file);im.onload=()=>{const k=Math.min(1,1100/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL("image/jpeg",.7))};im.onerror=()=>ko(new Error("Image illisible."));im.src=u})}
+async function pickReceipt(inp){
+  const f=inp.files[0],p=$("#rprev");if(!f)return;
+  try{S.rec=await compress(f);p.innerHTML=`<img src="${S.rec}" alt="Aperçu" style="max-width:140px;max-height:140px;border-radius:8px">`}catch(e){S.rec=undefined;p.textContent=e.message}
+}
+async function viewReceipt(id){
+  try{const j=await api("GET","/expenses/"+id+"/receipt");const o=document.createElement("div");o.className="ov";o.onclick=()=>o.remove();o.innerHTML=`<img alt="Reçu" src="${j.receipt}">`;document.body.appendChild(o)}catch(e){alert(e.message)}
+}
+function openPwd(){
+  $("#formbox").innerHTML=`<div class="card"><h2>Changer mon mot de passe</h2><label>Mot de passe actuel</label><input id="p0" type="password" autocomplete="current-password"><label>Nouveau mot de passe (8 caractères min.)</label><input id="p1" type="password" autocomplete="new-password"><label>Confirmer</label><input id="p2" type="password" autocomplete="new-password"><div class="err" id="ferr"></div><div style="display:flex;gap:8px;margin-top:6px"><button class="p" onclick="savePwd()">Enregistrer</button><button onclick="$('#formbox').innerHTML=''">Annuler</button></div></div>`;
+  $("#formbox").scrollIntoView({behavior:"smooth"});
+}
+async function savePwd(){
+  const e=$("#ferr");if($("#p1").value!==$("#p2").value)return e.textContent="Les mots de passe ne correspondent pas.";
+  try{await api("PUT","/password",{old:$("#p0").value,password:$("#p1").value});$("#formbox").innerHTML=`<div class="card">Mot de passe modifié.</div>`}catch(x){e.textContent=x.message}
+}
+async function resetPwd(id){
+  try{await api("PUT","/members/"+id+"/password",{password:$("#np").value});S.pwM=null;alert("Mot de passe modifié. Communiquez-le à l’employé.");upd()}catch(x){alert(x.message)}
+}
+function printReport(){
+  const l=getList(),tot=l.reduce((a,e)=>a+e.amount,0),by={};l.forEach(e=>by[e.cat]=(by[e.cat]||0)+e.amount);
+  $("#report").innerHTML=`<h1 style="font-size:20px;margin:0 0 4px">Rapport de dépenses</h1><p>${esc(S.me.company||S.me.name)} · ${S.month?mlabel(S.month):"Toutes périodes"}${S.cat?" · "+S.cat:""}<br>Édité le ${new Date().toLocaleDateString("fr-FR")}</p>
+  <h3>Total : ${fmt(tot)} (${l.length} dépense(s))</h3>
+  <table><tr><th>Catégorie</th><th class="n">Montant</th></tr>${Object.entries(by).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`<tr><td>${c}</td><td class="n">${fmt(v)}</td></tr>`).join("")}</table>
+  <h3>Détail</h3><table><tr><th>Date</th><th>Libellé</th><th>Catégorie</th>${isOrg()?"<th>Auteur</th><th>Statut</th>":""}<th class="n">Montant</th></tr>${l.map(e=>`<tr><td>${new Date(e.d+"T00:00").toLocaleDateString("fr-FR")}</td><td>${esc(e.label)}</td><td>${e.cat}</td>${isOrg()?`<td>${esc(e.who)}</td><td>${e.status}</td>`:""}<td class="n">${fmt(e.amount)}</td></tr>`).join("")}</table>`;
+  window.print();
+}
+let dip=null;
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();dip=e;const b=$("#inst");if(b)b.style.display=""});
+function installApp(){if(dip){dip.prompt();dip=null;const b=$("#inst");if(b)b.style.display="none"}}
+if("serviceWorker" in navigator)window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js").catch(()=>{}));
 init();
 </script>
 </body>

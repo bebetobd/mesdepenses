@@ -14,6 +14,7 @@ let ready;
 const init = () => ready || (ready = (async () => {
   await sql`CREATE TABLE IF NOT EXISTS orgs(id serial PRIMARY KEY, name text NOT NULL)`;
   await sql`CREATE TABLE IF NOT EXISTS users(id serial PRIMARY KEY, org_id int REFERENCES orgs(id) ON DELETE CASCADE, name text NOT NULL, email text UNIQUE NOT NULL, hash text NOT NULL, role text NOT NULL, cur text NOT NULL DEFAULT 'XOF', budget float8 NOT NULL DEFAULT 0)`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt text`;
   await sql`CREATE TABLE IF NOT EXISTS pending(email text PRIMARY KEY, name text NOT NULL, company text NOT NULL DEFAULT '', ent boolean NOT NULL, cur text NOT NULL, hash text NOT NULL, code_hash text NOT NULL, expires float8 NOT NULL, attempts int NOT NULL DEFAULT 0, last_sent float8 NOT NULL)`;
   await sql`CREATE TABLE IF NOT EXISTS expenses(id serial PRIMARY KEY, user_id int NOT NULL REFERENCES users(id) ON DELETE CASCADE, org_id int, d text NOT NULL, label text NOT NULL, amount float8 NOT NULL, cat text NOT NULL, note text NOT NULL DEFAULT '', status text NOT NULL DEFAULT 'En attente')`;
 })());
@@ -59,6 +60,12 @@ async function startVerification(p, res) {
   await sql`INSERT INTO pending(email,name,company,ent,cur,hash,code_hash,expires,attempts,last_sent) VALUES(${p.email},${p.name},${p.company},${p.ent},${p.cur},${p.hash},${codeHash(p.email, code)},${now + 600000},0,${now}) ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name,company=EXCLUDED.company,ent=EXCLUDED.ent,cur=EXCLUDED.cur,hash=EXCLUDED.hash,code_hash=EXCLUDED.code_hash,expires=EXCLUDED.expires,attempts=0,last_sent=EXCLUDED.last_sent`;
   await sendCode(p.email, p.name, code);
   return res.json({ pending: true });
+}
+
+function cleanReceipt(r) {
+  if (r === undefined) return undefined;
+  if (r === null) return null;
+  return typeof r === "string" && r.length < 600000 && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(r) ? r : false;
 }
 
 function cleanExpense(b) {
@@ -138,10 +145,19 @@ module.exports = async (req, res) => {
 
     if (a === "data" && m === "GET") {
       const expenses = admin
-        ? await sql`SELECT e.id,e.user_id,e.d,e.label,e.amount,e.cat,e.note,e.status,u.name AS who FROM expenses e JOIN users u ON u.id=e.user_id WHERE e.org_id=${me.org_id} ORDER BY e.d DESC, e.id DESC`
-        : await sql`SELECT e.id,e.user_id,e.d,e.label,e.amount,e.cat,e.note,e.status,u.name AS who FROM expenses e JOIN users u ON u.id=e.user_id WHERE e.user_id=${me.id} ORDER BY e.d DESC, e.id DESC`;
+        ? await sql`SELECT e.id,e.user_id,e.d,e.label,e.amount,e.cat,e.note,e.status,(e.receipt IS NOT NULL) AS rc,u.name AS who FROM expenses e JOIN users u ON u.id=e.user_id WHERE e.org_id=${me.org_id} ORDER BY e.d DESC, e.id DESC`
+        : await sql`SELECT e.id,e.user_id,e.d,e.label,e.amount,e.cat,e.note,e.status,(e.receipt IS NOT NULL) AS rc,u.name AS who FROM expenses e JOIN users u ON u.id=e.user_id WHERE e.user_id=${me.id} ORDER BY e.d DESC, e.id DESC`;
       const members = admin ? await sql`SELECT id,name,email,role FROM users WHERE org_id=${me.org_id} ORDER BY id` : [];
       return res.json({ me, expenses, members });
+    }
+
+    if (a === "password" && m === "PUT") {
+      const row = (await sql`SELECT hash FROM users WHERE id=${me.id}`)[0];
+      if (!(await bcrypt.compare(String(body.old || ""), row.hash))) return err(res, 400, "Mot de passe actuel incorrect.");
+      const pw = String(body.password || "");
+      if (pw.length < 8) return err(res, 400, "Mot de passe : 8 caractères minimum.");
+      await sql`UPDATE users SET hash=${await bcrypt.hash(pw, 10)} WHERE id=${me.id}`;
+      return res.json({ ok: true });
     }
 
     if (a === "budget" && m === "PUT") {
@@ -151,10 +167,12 @@ module.exports = async (req, res) => {
     }
 
     if (a === "expenses") {
+      const rc = cleanReceipt(body.receipt);
+      if (rc === false) return err(res, 400, "Photo invalide ou trop lourde.");
       if (m === "POST" && !b) {
         const o = cleanExpense(body);
         if (!o) return err(res, 400, "Date, libellé, catégorie et montant positif obligatoires.");
-        await sql`INSERT INTO expenses(user_id,org_id,d,label,amount,cat,note) VALUES(${me.id},${me.org_id},${o.d},${o.label},${o.amount},${o.cat},${o.note})`;
+        await sql`INSERT INTO expenses(user_id,org_id,d,label,amount,cat,note,receipt) VALUES(${me.id},${me.org_id},${o.d},${o.label},${o.amount},${o.cat},${o.note},${rc || null})`;
         return res.json({ ok: true });
       }
       const id = parseInt(b, 10);
@@ -167,12 +185,17 @@ module.exports = async (req, res) => {
         await sql`UPDATE expenses SET status=${body.status} WHERE id=${id}`;
         return res.json({ ok: true });
       }
+      if (c === "receipt" && m === "GET") {
+        if (e.user_id !== me.id && !(admin && e.org_id === me.org_id)) return err(res, 403, "Accès refusé.");
+        return e.receipt ? res.json({ receipt: e.receipt }) : err(res, 404, "Aucun reçu.");
+      }
       const mine = e.user_id === me.id && (me.role !== "member" || e.status === "En attente");
       if (m === "PUT") {
         if (!mine) return err(res, 403, "Modification non autorisée.");
         const o = cleanExpense(body);
         if (!o) return err(res, 400, "Données invalides.");
         await sql`UPDATE expenses SET d=${o.d},label=${o.label},amount=${o.amount},cat=${o.cat},note=${o.note} WHERE id=${id}`;
+        if (rc !== undefined) await sql`UPDATE expenses SET receipt=${rc} WHERE id=${id}`;
         return res.json({ ok: true });
       }
       if (m === "DELETE") {
@@ -194,6 +217,12 @@ module.exports = async (req, res) => {
         const hash = await bcrypt.hash(password, 10);
         await sql`INSERT INTO users(org_id,name,email,hash,role,cur) VALUES(${me.org_id},${name},${email},${hash},'member',${me.cur})`;
         return res.json({ ok: true });
+      }
+      if (m === "PUT" && c === "password") {
+        const id = parseInt(b, 10), pw = String(body.password || "");
+        if (!id || pw.length < 8) return err(res, 400, "Mot de passe : 8 caractères minimum.");
+        const r = await sql`UPDATE users SET hash=${await bcrypt.hash(pw, 10)} WHERE id=${id} AND org_id=${me.org_id} AND role='member' RETURNING id`;
+        return r.length ? res.json({ ok: true }) : err(res, 404, "Employé introuvable.");
       }
       if (m === "DELETE") {
         const id = parseInt(b, 10);
