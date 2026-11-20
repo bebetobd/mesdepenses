@@ -40,6 +40,24 @@ button:disabled{opacity:.6}
 .acts{display:flex;gap:6px;justify-content:flex-end;margin-top:4px}
 .cat{display:grid;grid-template-columns:110px 1fr auto;gap:10px;align-items:center;margin:7px 0;font-size:13px}.cat .bar{margin:0}
 .empty{text-align:center;color:var(--mu);padding:20px 0}
+input,select{font-size:16px;min-height:44px}
+button{min-height:40px}button.s{min-height:34px}
+.btns{display:flex;gap:8px}
+.fab{display:none;position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:56px;height:56px;min-height:56px;border-radius:50%;padding:0;font-size:30px;line-height:1;box-shadow:0 4px 14px rgba(0,0,0,.35);z-index:5}
+@media(max-width:640px){
+.wrap{padding:12px 12px 90px}
+.card{padding:14px}
+.top{flex-direction:column;align-items:stretch}
+.btns{display:grid;grid-template-columns:1fr 1fr}.hm{display:none}
+.fab{display:block}
+.grid{grid-template-columns:1fr}.big{font-size:20px}
+.r2{grid-template-columns:1fr}
+.it{flex-direction:column;align-items:stretch;gap:8px}
+.it .r{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;text-align:left;white-space:normal}
+.it .r b{display:inline}.acts{margin-top:0}
+.cat{grid-template-columns:84px 1fr auto}
+.auth{margin:2vh auto}
+}
 </style>
 </head>
 <body>
@@ -52,7 +70,7 @@ const STAT=["En attente","Approuvée","Remboursée","Rejetée"];
 const CUR={XOF:"FCFA",EUR:"€",USD:"$"};
 const today=()=>new Date().toISOString().slice(0,10);
 const tk={get(){try{return localStorage.getItem("dep_token")}catch(e){return null}},set(v){try{v?localStorage.setItem("dep_token",v):localStorage.removeItem("dep_token")}catch(e){}}};
-let S={token:tk.get(),mode:"login",type:"individuel",me:null,exp:[],members:[],q:"",cat:"",month:"",form:null,del:null,delM:null,busy:false};
+let S={token:tk.get(),pend:null,mode:"login",type:"individuel",me:null,exp:[],members:[],q:"",cat:"",month:"",form:null,del:null,delM:null,busy:false};
 
 async function api(m,p,b){
   const r=await fetch("/api"+p,{method:m,headers:{"Content-Type":"application/json",...(S.token?{Authorization:"Bearer "+S.token}:{})},body:b?JSON.stringify(b):undefined});
@@ -77,10 +95,26 @@ async function submitAuth(){
   btn.disabled=true;
   try{
     const j=await api("POST","/auth/"+S.mode,{type:S.type,name:su?$("#nm").value:"",company:S.type==="entreprise"&&su?$("#co").value:"",email:$("#em").value,password:$("#pw").value,cur:su?$("#cu").value:""});
-    S.token=j.token;tk.set(j.token);await loadData();S.q=S.cat=S.month="";render();
+    if(j.pending){S.pend=$("#em").value.trim().toLowerCase();render();return}
+    await finish(j);
   }catch(x){e.textContent=x.message;btn.disabled=false}
 }
+async function finish(j){S.token=j.token;tk.set(j.token);S.pend=null;await loadData();S.q=S.cat=S.month="";render()}
+async function verify(){
+  const e=$("#err"),b=$("#go");e.style.color="";e.textContent="";b.disabled=true;
+  try{await finish(await api("POST","/auth/verify",{email:S.pend,code:$("#cd").value.trim()}))}catch(x){e.textContent=x.message;b.disabled=false}
+}
+async function resend(){
+  const e=$("#err");
+  try{await api("POST","/auth/resend",{email:S.pend});e.style.color="var(--ac)";e.textContent="Nouveau code envoyé."}catch(x){e.style.color="";e.textContent=x.message}
+}
 function authView(){
+  if(S.pend)return `<div class="auth"><div class="card"><div class="logo"><i>₣</i>MesDépenses</div>
+  <p class="mu">Un code à 6 chiffres a été envoyé à <b>${esc(S.pend)}</b>. Entrez-le ci-dessous (valable 10 minutes). Pensez à vérifier vos courriers indésirables.</p>
+  <label>Code de confirmation</label><input id="cd" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="letter-spacing:6px;text-align:center;font-size:22px" onkeydown="if(event.key==='Enter')verify()">
+  <div class="err" id="err"></div>
+  <button id="go" class="p" style="width:100%" onclick="verify()">Valider mon compte</button>
+  <p class="mu" style="text-align:center;margin:14px 0 0"><a href="#" style="color:var(--ac)" onclick="resend();return false">Renvoyer le code</a> · <a href="#" style="color:var(--ac)" onclick="S.pend=null;render();return false">Modifier mes informations</a></p></div></div>`;
   const su=S.mode==="signup";
   return `<div class="auth"><div class="card"><div class="logo"><i>₣</i>MesDépenses</div>
   <p class="mu">${su?"Créez votre compte pour gérer vos dépenses.":"Connectez-vous pour accéder à vos dépenses."}</p>
@@ -100,7 +134,8 @@ function keep(t){const v={nm:$("#nm")&&$("#nm").value,em:$("#em").value,pw:$("#p
 function appView(){
   const m=S.me;
   return `<div class="top"><div><div class="logo"><i>₣</i>MesDépenses</div><span class="mu">${esc(m.name)}${m.company?" · "+esc(m.company):""} <span class="badge">${isAdmin()?"Administrateur":m.role==="member"?"Employé":"Individuel"}</span></span></div>
-  <div style="display:flex;gap:8px"><button onclick="exportCsv()">Exporter CSV</button><button class="p" onclick="openForm()">+ Dépense</button><button onclick="logout()">Déconnexion</button></div></div>
+  <div class="btns"><button onclick="exportCsv()">Exporter CSV</button><button class="p hm" onclick="openForm()">+ Dépense</button><button onclick="logout()">Déconnexion</button></div></div>
+  <button class="p fab" onclick="openForm()" aria-label="Ajouter une dépense">+</button>
   <div class="grid" id="sum"></div><div id="formbox"></div>
   <div class="card"><h2>Répartition par catégorie</h2><div id="cats"></div></div>
   <div class="card"><h2>Dépenses${isAdmin()?" de l’entreprise":""}</h2>
