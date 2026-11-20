@@ -14,9 +14,10 @@ let ready;
 const init = () => ready || (ready = (async () => {
   await sql`CREATE TABLE IF NOT EXISTS orgs(id serial PRIMARY KEY, name text NOT NULL)`;
   await sql`CREATE TABLE IF NOT EXISTS users(id serial PRIMARY KEY, org_id int REFERENCES orgs(id) ON DELETE CASCADE, name text NOT NULL, email text UNIQUE NOT NULL, hash text NOT NULL, role text NOT NULL, cur text NOT NULL DEFAULT 'XOF', budget float8 NOT NULL DEFAULT 0)`;
-  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt text`;
   await sql`CREATE TABLE IF NOT EXISTS pending(email text PRIMARY KEY, name text NOT NULL, company text NOT NULL DEFAULT '', ent boolean NOT NULL, cur text NOT NULL, hash text NOT NULL, code_hash text NOT NULL, expires float8 NOT NULL, attempts int NOT NULL DEFAULT 0, last_sent float8 NOT NULL)`;
   await sql`CREATE TABLE IF NOT EXISTS expenses(id serial PRIMARY KEY, user_id int NOT NULL REFERENCES users(id) ON DELETE CASCADE, org_id int, d text NOT NULL, label text NOT NULL, amount float8 NOT NULL, cat text NOT NULL, note text NOT NULL DEFAULT '', status text NOT NULL DEFAULT 'En attente')`;
+  await sql`ALTER TABLE expenses ADD COLUMN IF NOT EXISTS receipt text`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()`;
 })());
 
 const err = (res, code, msg) => res.status(code).json({ error: msg });
@@ -79,7 +80,7 @@ module.exports = async (req, res) => {
     if (!process.env.DATABASE_URL || !SECRET) return err(res, 500, "Configuration manquante : DATABASE_URL ou JWT_SECRET.");
     await init();
     const path = new URL(req.url, "http://x").pathname.replace(/^\/api\/?/, "").replace(/\/$/, "");
-    const [a, b, c] = path.split("/");
+    const [a, b, c, d] = path.split("/");
     const m = req.method;
     const body = req.body && typeof req.body === "object" ? req.body : {};
 
@@ -142,13 +143,43 @@ module.exports = async (req, res) => {
     const me = await auth(req);
     if (!me) return err(res, 401, "Non connecté");
     const admin = me.role === "admin";
+    const sa = !!process.env.SUPERADMIN_EMAIL && me.email === process.env.SUPERADMIN_EMAIL.trim().toLowerCase();
+
+    if (a === "admin") {
+      if (!sa) return err(res, 403, "Réservé au super administrateur.");
+      if (b === "overview" && m === "GET") {
+        const users = await sql`SELECT u.id,u.name,u.email,u.role,u.cur,u.org_id,o.name AS company,to_char(u.created_at,'DD/MM/YYYY') AS created,(SELECT count(*) FROM expenses e WHERE e.user_id=u.id)::int AS nb,(SELECT coalesce(sum(e.amount),0) FROM expenses e WHERE e.user_id=u.id)::float8 AS total FROM users u LEFT JOIN orgs o ON o.id=u.org_id ORDER BY u.id DESC`;
+        const orgs = (await sql`SELECT count(*)::int AS n FROM orgs`)[0].n;
+        const expenses = (await sql`SELECT count(*)::int AS n FROM expenses`)[0].n;
+        return res.json({ users, stats: { users: users.length, solo: users.filter((u) => !u.org_id).length, orgs, expenses } });
+      }
+      const id = parseInt(c, 10);
+      if (!id) return err(res, 404, "Introuvable");
+      if (b === "users" && m === "PUT" && d === "password") {
+        const pw = String(body.password || "");
+        if (pw.length < 8) return err(res, 400, "Mot de passe : 8 caractères minimum.");
+        const r = await sql`UPDATE users SET hash=${await bcrypt.hash(pw, 10)} WHERE id=${id} RETURNING id`;
+        return r.length ? res.json({ ok: true }) : err(res, 404, "Utilisateur introuvable.");
+      }
+      if (b === "users" && m === "DELETE") {
+        if (id === me.id) return err(res, 400, "Vous ne pouvez pas supprimer votre propre compte.");
+        await sql`DELETE FROM users WHERE id=${id}`;
+        return res.json({ ok: true });
+      }
+      if (b === "orgs" && m === "DELETE") {
+        if (id === me.org_id) return err(res, 400, "Vous ne pouvez pas supprimer votre propre entreprise.");
+        await sql`DELETE FROM orgs WHERE id=${id}`;
+        return res.json({ ok: true });
+      }
+      return err(res, 404, "Introuvable");
+    }
 
     if (a === "data" && m === "GET") {
       const expenses = admin
         ? await sql`SELECT e.id,e.user_id,e.d,e.label,e.amount,e.cat,e.note,e.status,(e.receipt IS NOT NULL) AS rc,u.name AS who FROM expenses e JOIN users u ON u.id=e.user_id WHERE e.org_id=${me.org_id} ORDER BY e.d DESC, e.id DESC`
         : await sql`SELECT e.id,e.user_id,e.d,e.label,e.amount,e.cat,e.note,e.status,(e.receipt IS NOT NULL) AS rc,u.name AS who FROM expenses e JOIN users u ON u.id=e.user_id WHERE e.user_id=${me.id} ORDER BY e.d DESC, e.id DESC`;
       const members = admin ? await sql`SELECT id,name,email,role FROM users WHERE org_id=${me.org_id} ORDER BY id` : [];
-      return res.json({ me, expenses, members });
+      return res.json({ me: { ...me, sa }, expenses, members });
     }
 
     if (a === "password" && m === "PUT") {

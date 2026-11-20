@@ -110,7 +110,7 @@ async function init(){
   if(S.token){try{await loadData()}catch(e){S.token=null;tk.set(null)}}
   render();
 }
-function logout(){S.token=null;S.me=null;tk.set(null);S.mode="login";render()}
+function logout(){S.view=null;S.token=null;S.me=null;tk.set(null);S.mode="login";render()}
 async function submitAuth(){
   const e=$("#err"),su=S.mode==="signup",btn=$("#go");e.textContent="";
   if(su&&$("#pw2").value!==$("#pw").value)return e.textContent="Les mots de passe ne correspondent pas.";
@@ -156,7 +156,7 @@ function keep(t){const v={nm:$("#nm")&&$("#nm").value,em:$("#em").value,pw:$("#p
 function appView(){
   const m=S.me;
   return `<div class="top"><div><div class="logo"><i>₣</i>MesDépenses</div><span class="mu">${esc(m.name)}${m.company?" · "+esc(m.company):""} <span class="badge">${isAdmin()?"Administrateur":m.role==="member"?"Employé":"Individuel"}</span></span></div>
-  <div class="btns"><button class="p hm" onclick="openForm()">+ Dépense</button><button onclick="exportCsv()">Exporter CSV</button><button onclick="printReport()">Rapport PDF</button><button onclick="openPwd()">Mot de passe</button><button id="inst" ${dip?"":'style="display:none"'} onclick="installApp()">Installer l’app</button><button onclick="logout()">Déconnexion</button></div></div>
+  <div class="btns"><button class="p hm" onclick="openForm()">+ Dépense</button><button onclick="exportCsv()">Exporter CSV</button><button onclick="printReport()">Rapport PDF</button><button onclick="openPwd()">Mot de passe</button><button id="inst" ${dip?"":'style="display:none"'} onclick="installApp()">Installer l’app</button>${m.sa?`<button onclick="openAdmin()">Super admin</button>`:""}<button onclick="logout()">Déconnexion</button></div></div>
   <button class="p fab" onclick="openForm()" aria-label="Ajouter une dépense">+</button>
   <div class="grid" id="sum"></div><div id="formbox"></div>
   <div class="card"><h2>Évolution sur 6 mois</h2><div class="mc" id="mchart"></div></div>
@@ -228,7 +228,7 @@ function exportCsv(){
   const rows=[["Date","Libellé","Catégorie","Montant","Auteur","Statut","Note"],...S.exp.map(e=>[e.d,e.label,e.cat,e.amount,e.who,e.status,e.note])];
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["\ufeff"+rows.map(r=>r.map(q).join(";")).join("\n")],{type:"text/csv"}));a.download="depenses.csv";a.click();
 }
-function render(){$("#app").innerHTML=S.me?appView():authView();if(S.me)upd()}
+function render(){$("#app").innerHTML=S.me?(S.view==="admin"?adminView():appView()):authView();if(S.me&&S.view!=="admin")upd();else if(S.me&&S.adm)updAdmin()}
 function compress(file){return new Promise((ok,ko)=>{const im=new Image(),u=URL.createObjectURL(file);im.onload=()=>{const k=Math.min(1,1100/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext("2d").drawImage(im,0,0,c.width,c.height);URL.revokeObjectURL(u);ok(c.toDataURL("image/jpeg",.7))};im.onerror=()=>ko(new Error("Image illisible."));im.src=u})}
 async function pickReceipt(inp){
   const f=inp.files[0],p=$("#rprev");if(!f)return;
@@ -256,6 +256,27 @@ function printReport(){
   <h3>Détail</h3><table><tr><th>Date</th><th>Libellé</th><th>Catégorie</th>${isOrg()?"<th>Auteur</th><th>Statut</th>":""}<th class="n">Montant</th></tr>${l.map(e=>`<tr><td>${new Date(e.d+"T00:00").toLocaleDateString("fr-FR")}</td><td>${esc(e.label)}</td><td>${e.cat}</td>${isOrg()?`<td>${esc(e.who)}</td><td>${e.status}</td>`:""}<td class="n">${fmt(e.amount)}</td></tr>`).join("")}</table>`;
   window.print();
 }
+function adminView(){return `<div class="top"><div><div class="logo"><i>₣</i>MesDépenses</div><span class="mu">Espace super administrateur <span class="badge">Super admin</span></span></div>
+  <div class="btns"><button onclick="S.view=null;render()">← Mon espace</button><button onclick="openAdmin()">Actualiser</button><button onclick="logout()">Déconnexion</button></div></div>
+  <div class="grid" id="admstats"></div>
+  <div class="card"><h2>Utilisateurs inscrits</h2><input id="aq" placeholder="Rechercher un nom, un e-mail, une entreprise…" value="${esc(S.aq||"")}" oninput="S.aq=this.value;updAdmin()" style="margin-bottom:8px"><div id="admlist"><div class="empty">Chargement…</div></div></div>`}
+async function openAdmin(){S.view="admin";render();try{S.adm=await api("GET","/admin/overview");updAdmin()}catch(e){alert(e.message);S.view=null;render()}}
+function updAdmin(){
+  const A=S.adm;if(!A||!$("#admlist"))return;
+  const q=(S.aq||"").toLowerCase(),fc=(n,c)=>new Intl.NumberFormat("fr-FR",{maximumFractionDigits:c==="XOF"?0:2}).format(n)+" "+CUR[c];
+  const us=A.users.filter(u=>!q||(u.name+" "+u.email+" "+(u.company||"")).toLowerCase().includes(q));
+  $("#admstats").innerHTML=[["Utilisateurs",A.stats.users],["Particuliers",A.stats.solo],["Entreprises",A.stats.orgs],["Dépenses enregistrées",A.stats.expenses]].map(([l,v])=>`<div class="card"><div class="mu">${l}</div><div class="big">${v}</div></div>`).join("");
+  const act=u=>{
+    if(u.id===S.me.id)return `<span class="badge">Vous</span>`;
+    if(S.admPw===u.id)return `<div class="acts"><input id="ap" placeholder="Nouveau mot de passe" style="width:170px;min-height:34px;padding:5px 8px"><button class="s p" onclick="admPwd(${u.id})">OK</button><button class="s" onclick="S.admPw=null;updAdmin()">×</button></div>`;
+    const k="u"+u.id,ko="o"+u.org_id;
+    if(S.admC===k||S.admC===ko)return `<div class="mu">${S.admC[0]==="o"?"Supprime l’entreprise, ses employés et leurs dépenses.":"Supprime ce compte et ses dépenses."}</div><div class="acts"><button class="s d" onclick="admDel('${S.admC}')">Confirmer</button><button class="s" onclick="S.admC=null;updAdmin()">Annuler</button></div>`;
+    return `<div class="acts"><button class="s" onclick="S.admPw=${u.id};updAdmin()">Mot de passe</button><button class="s d" onclick="S.admC='${k}';updAdmin()">Supprimer</button>${u.org_id&&u.role==="admin"?`<button class="s d" onclick="S.admC='${ko}';updAdmin()">Suppr. l’entreprise</button>`:""}</div>`};
+  $("#admlist").innerHTML=us.length?us.map(u=>`<div class="it"><div class="l"><b>${esc(u.name)}</b><span class="mu">${esc(u.email)}<br>${u.org_id?"Entreprise : "+esc(u.company)+" · "+(u.role==="admin"?"Administrateur":"Employé"):"Particulier"} · inscrit le ${u.created}</span></div>
+  <div class="r"><b>${fc(u.total,u.cur)}</b><span class="mu">${u.nb} dépense(s)</span>${act(u)}</div></div>`).join(""):`<div class="empty">Aucun utilisateur.</div>`;
+}
+async function admDel(k){try{await api("DELETE","/admin/"+(k[0]==="o"?"orgs/":"users/")+k.slice(1));S.admC=null;S.adm=await api("GET","/admin/overview");updAdmin()}catch(e){alert(e.message)}}
+async function admPwd(id){try{await api("PUT","/admin/users/"+id+"/password",{password:$("#ap").value});S.admPw=null;alert("Mot de passe modifié. Communiquez-le à l’utilisateur.");updAdmin()}catch(e){alert(e.message)}}
 let dip=null;
 window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();dip=e;const b=$("#inst");if(b)b.style.display=""});
 function installApp(){if(dip){dip.prompt();dip=null;const b=$("#inst");if(b)b.style.display="none"}}
